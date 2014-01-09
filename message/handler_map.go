@@ -41,17 +41,19 @@ func (handlerMap HandlerMap) register(contex interface{}, printLog bool) {
 	for i := 0; i < t.NumMethod(); i++ {
 		method := t.Method(i)
 		if isSuitableMethod(&method, printLog) {
-			handlerMap.registerHandler(method.Type.In(1), &method)
+			key := method.Type.In(1)
+			if _, ok := handlerMap[key]; ok {
+				if printLog {
+					log.Printf("%v:duplicate handler of %v, override.\n", t.Name(), key.Name())
+				}
+			}
+			handlerMap[method.Type.In(1)] = &method
 			num++
 		}
 	}
 	if printLog {
 		log.Printf("%v:%v handler(s) registered.\n", t.Name(), num)
 	}
-}
-
-func (handlerMap HandlerMap) registerHandler(typ reflect.Type, method *reflect.Method) {
-	handlerMap[typ] = method
 }
 
 var typeOfError = reflect.TypeOf((*error)(nil)).Elem()
