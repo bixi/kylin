@@ -5,22 +5,26 @@ import (
 	"testing"
 )
 
-type testMessage struct {
-}
-
-func TestTypeMap(t *testing.T) {
+func TestTypeMapRigister(t *testing.T) {
 	typeMap := NewTypeMap()
-	err := typeMap.Register(testMessage{})
+	var hello string = "hello"
+	err := typeMap.Register(hello)
 	if err != nil {
 		t.Fatal(err)
 	}
-	message := typeMap.Get("testMessage")
-	if (reflect.TypeOf(message) != reflect.TypeOf(testMessage{})) {
+	message := typeMap.Instantiate("string")
+	if reflect.TypeOf(message) != reflect.TypeOf(hello) {
 		t.Fail()
 	}
-	typeMap.RegisterName("PointerToTestMessage", &testMessage{})
-	message := typeMap.Get("PointerToTestMessage")
-	if (reflect.TypeOf(message) != reflect.TypeOf(&testMessage{})) {
+
+}
+
+func TestTypeMapRigisterName(t *testing.T) {
+	typeMap := NewTypeMap()
+	var hello string = "hello"
+	typeMap.RegisterName("PointerToString", &hello)
+	message := typeMap.Instantiate("PointerToString")
+	if reflect.TypeOf(message) != reflect.TypeOf(&hello) {
 		t.Fail()
 	}
 }
