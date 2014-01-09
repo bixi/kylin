@@ -10,7 +10,7 @@ import (
 
 // echo back the websocket.
 func EchoServer(ws *websocket.Conn) {
-	var transporter Transporter
+	var transporter *Transporter
 	onMessage := func(message interface{}) {
 		transporter.Send(message)
 		transporter.Stop()
@@ -18,7 +18,8 @@ func EchoServer(ws *websocket.Conn) {
 	onError := func(err error) {
 		log.Println(err)
 	}
-	transporter.Start(getEncoder(ws), getDecoder(ws), onMessage, onError)
+	transporter = NewTransporter(getEncoder(ws), getDecoder(ws), onMessage, onError)
+	transporter.Start()
 	<-transporter.Done
 }
 
@@ -59,7 +60,7 @@ func TestConn(t *testing.T) {
 		t.Fatal(err.Error())
 	}
 
-	var transporter Transporter
+	var transporter *Transporter
 	var result string
 
 	onMessage := func(message interface{}) {
@@ -69,7 +70,8 @@ func TestConn(t *testing.T) {
 	onError := func(err error) {
 		log.Println(err)
 	}
-	transporter.Start(getEncoder(ws), getDecoder(ws), onMessage, onError)
+	transporter = NewTransporter(getEncoder(ws), getDecoder(ws), onMessage, onError)
+	transporter.Start()
 	transporter.Send(testMessage{"Hello"})
 	<-transporter.Done
 	if result != "Hello" {

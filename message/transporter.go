@@ -20,27 +20,31 @@ type Transporter struct {
 	messageHandler MessageHandler
 	errorHandler   ErrorHandler
 	sendbox        chan []interface{}
-	isInitialized  bool
+	isRunning      bool
 	isStopped      bool
 }
 
-func (transporter *Transporter) Start(
-	encoder Encoder,
+func NewTransporter(encoder Encoder,
 	decoder Decoder,
 	messageHandler MessageHandler,
-	errorHandler ErrorHandler) error {
-	transporter.mutex.Lock()
-	defer transporter.mutex.Unlock()
-	if transporter.isInitialized {
-		return errors.New("Transporter is running.")
-	}
-
+	errorHandler ErrorHandler) *Transporter {
+	var transporter Transporter
 	transporter.encoder = encoder
 	transporter.decoder = decoder
 	transporter.messageHandler = messageHandler
 	transporter.errorHandler = errorHandler
 	transporter.sendbox = make(chan []interface{}, 1)
-	transporter.isInitialized = true
+	return &transporter
+}
+
+func (transporter *Transporter) Start() error {
+	transporter.mutex.Lock()
+	defer transporter.mutex.Unlock()
+	if transporter.isRunning {
+		return errors.New("Transporter is running.")
+	}
+
+	transporter.isRunning = true
 	done := make(chan bool)
 	transporter.Done = done
 
