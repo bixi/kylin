@@ -39,7 +39,7 @@ func (transporter *Transporter) Start(
 	transporter.decoder = decoder
 	transporter.messageHandler = messageHandler
 	transporter.errorHandler = errorHandler
-	transporter.sendbox = make(chan []interface{})
+	transporter.sendbox = make(chan []interface{}, 1)
 	transporter.isInitialized = true
 	done := make(chan bool)
 	transporter.Done = done
@@ -74,6 +74,8 @@ func (transporter *Transporter) Start(
 }
 
 func (transporter *Transporter) Send(message interface{}) {
+	transporter.mutex.Lock()
+	defer transporter.mutex.Unlock()
 	select {
 	case messages := <-transporter.sendbox:
 		messages = append(messages, message)
