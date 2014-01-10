@@ -3,4 +3,3 @@
 /*
 kylin document
 */
-package main
