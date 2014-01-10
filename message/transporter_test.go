@@ -9,15 +9,16 @@ import (
 )
 
 // echo back the websocket.
-func EchoServer(ws *websocket.Conn) {
+func testTransporterEchoServer(ws *websocket.Conn) {
 	var transporter *Transporter
-	onMessage := func(message interface{}) {
+	onMessage := DispatcherFunc(func(message interface{}) error {
 		transporter.Send(message)
 		transporter.Stop()
-	}
-	onError := func(err error) {
+		return nil
+	})
+	onError := ErrorHandlerFunc(func(err error) {
 		log.Println(err)
-	}
+	})
 	transporter = NewTransporter(getEncoder(ws), getDecoder(ws), onMessage, onError)
 	transporter.Start()
 	<-transporter.Done
@@ -32,7 +33,7 @@ func getEncoder(ws *websocket.Conn) Encoder {
 	encoder := func(message interface{}) error {
 		return gobEncoder.Encode(&message)
 	}
-	return encoder
+	return EncoderFunc(encoder)
 }
 
 func getDecoder(ws *websocket.Conn) Decoder {
@@ -42,12 +43,12 @@ func getDecoder(ws *websocket.Conn) Decoder {
 		err := gobDecoder.Decode(&buf)
 		return buf, err
 	}
-	return decoder
+	return DecoderFunc(decoder)
 }
 
-func TestConn(t *testing.T) {
+func TestTransporter(t *testing.T) {
 	gob.Register(testMessage{})
-	http.Handle("/echo", websocket.Handler(EchoServer))
+	http.Handle("/echo", websocket.Handler(testTransporterEchoServer))
 	go func() {
 		err := http.ListenAndServe(":12344", nil)
 		if err != nil {
@@ -63,13 +64,14 @@ func TestConn(t *testing.T) {
 	var transporter *Transporter
 	var result string
 
-	onMessage := func(message interface{}) {
+	onMessage := DispatcherFunc(func(message interface{}) error {
 		result = message.(testMessage).Info
 		transporter.Stop()
-	}
-	onError := func(err error) {
+		return nil
+	})
+	onError := ErrorHandlerFunc(func(err error) {
 		log.Println(err)
-	}
+	})
 	transporter = NewTransporter(getEncoder(ws), getDecoder(ws), onMessage, onError)
 	transporter.Start()
 	transporter.Send(testMessage{"Hello"})

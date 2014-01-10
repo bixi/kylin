@@ -7,31 +7,26 @@ import (
 	"sync"
 )
 
-type Encoder func(interface{}) error
-type Decoder func() (interface{}, error)
-type MessageHandler func(interface{})
-type ErrorHandler func(error)
-
 type Transporter struct {
-	Done           <-chan bool
-	mutex          sync.Mutex
-	encoder        Encoder
-	decoder        Decoder
-	messageHandler MessageHandler
-	errorHandler   ErrorHandler
-	sendbox        chan []interface{}
-	isRunning      bool
-	isStopped      bool
+	Done         <-chan bool
+	mutex        sync.Mutex
+	encoder      Encoder
+	decoder      Decoder
+	dispatcher   Dispatcher
+	errorHandler ErrorHandler
+	sendbox      chan []interface{}
+	isRunning    bool
+	isStopped    bool
 }
 
 func NewTransporter(encoder Encoder,
 	decoder Decoder,
-	messageHandler MessageHandler,
+	dispatcher Dispatcher,
 	errorHandler ErrorHandler) *Transporter {
 	var transporter Transporter
 	transporter.encoder = encoder
 	transporter.decoder = decoder
-	transporter.messageHandler = messageHandler
+	transporter.dispatcher = dispatcher
 	transporter.errorHandler = errorHandler
 	transporter.sendbox = make(chan []interface{}, 1)
 	return &transporter
@@ -63,9 +58,9 @@ func (transporter *Transporter) Start() error {
 	//receving goroutine
 	go func() {
 		for {
-			message, err := transporter.decoder()
+			message, err := transporter.decoder.Decode()
 			if err == nil {
-				transporter.messageHandler(message)
+				transporter.dispatcher.Dispatch(message)
 			} else {
 				transporter.handleError(err)
 				transporter.Stop()
@@ -90,14 +85,15 @@ func (transporter *Transporter) Send(message interface{}) {
 	}
 }
 
-func (transporter *Transporter) Stop() {
+func (transporter *Transporter) Stop() error {
 	transporter.mutex.Lock()
 	defer transporter.mutex.Unlock()
 	if transporter.isStopped {
-		return
+		return errors.New("Transporter has stopped.")
 	}
 	transporter.isStopped = true
 	close(transporter.sendbox)
+	return nil
 }
 
 func shouldReport(err error) bool {
@@ -115,7 +111,7 @@ func shouldReport(err error) bool {
 
 func (transporter *Transporter) processSendingMessages(messages []interface{}) error {
 	for _, message := range messages {
-		err := transporter.encoder(message)
+		err := transporter.encoder.Encode(message)
 		if err != nil {
 			return err
 		}
@@ -126,7 +122,7 @@ func (transporter *Transporter) processSendingMessages(messages []interface{}) e
 func (transporter *Transporter) handleError(err error) {
 	if transporter.errorHandler != nil {
 		if shouldReport(err) {
-			transporter.errorHandler(err)
+			transporter.errorHandler.Handle(err)
 		}
 	}
 }
