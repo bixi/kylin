@@ -5,6 +5,7 @@ import (
 	"encoding/gob"
 	"log"
 	"net/http"
+	"reflect"
 	"testing"
 )
 
@@ -74,7 +75,7 @@ func TestTransporter(t *testing.T) {
 	})
 	transporter = NewTransporter(getEncoder(ws), getDecoder(ws), onMessage, onError)
 	transporter.Start()
-	transporter.Send(testMessage{"Hello"})
+	transporter.Send(&testMessage{"Hello"})
 	<-transporter.Done
 	if result != "Hello" {
 		t.Fail()

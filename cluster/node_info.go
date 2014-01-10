@@ -1,6 +1,6 @@
 package cluster
 
 type NodeInfo struct {
-	Address     string
-	Description string
+	Address     string `json:"address"`
+	Description string `json:"description"`
 }
