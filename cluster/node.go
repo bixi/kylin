@@ -7,8 +7,8 @@ import (
 	"errors"
 	"github.com/bixi/kylin/message"
 	"log"
+	"net"
 	"net/http"
-	"reflect"
 	"sync"
 )
 
@@ -18,28 +18,33 @@ const (
 	ConnectPath = "/kylin/cluster/connect"
 )
 
-type NodeJoinListener func(NodeInfo)
-type MessageHandler func(interface{}) bool
-
-type nodeData struct {
-	info        NodeInfo
-	transporter *message.Transporter
-	conn        *websocket.Conn
-}
+type NodeJoinListener func(*NodeConnection)
+type MessageHandler func(message interface{}) (handled bool)
 
 type Node struct {
 	config            Config
 	nodeJoinListeners []NodeJoinListener
 	messageHandlers   []MessageHandler
-	nodes             map[string]*nodeData
+	nodes             map[string]*NodeConnection
+	server            *http.Server
+	netListener       net.Listener
 	isInitialized     bool
 	mutex             sync.Mutex
 }
 
+var innerMessagesRegistered = false
+var registerMutex = sync.Mutex{}
+
 func NewNode(config Config) *Node {
 	var node Node
 	node.config = config
-	node.nodes = make(map[string]*nodeData)
+	node.nodes = make(map[string]*NodeConnection)
+	mux := http.NewServeMux()
+	mux.HandleFunc(NotifyPath, node.handleNotify)
+	mux.HandleFunc(ListPath, node.handleList)
+	mux.Handle(ConnectPath, websocket.Handler(node.handleConnect))
+
+	node.server = &http.Server{Addr: config.Address, Handler: mux}
 	return &node
 }
 
@@ -68,20 +73,43 @@ func (node *Node) RegisterMessage(message interface{}) {
 	gob.Register(message)
 }
 
+func registerInnerMessages() {
+	registerMutex.Lock()
+	defer registerMutex.Unlock()
+	if innerMessagesRegistered {
+		return
+	}
+	innerMessagesRegistered = true
+	gob.Register(NodeInfo{})
+}
+
 func (node *Node) Start() error {
+	registerInnerMessages()
 	node.mutex.Lock()
 	defer node.mutex.Unlock()
 	if node.isInitialized {
 		return errors.New("Node has started.")
 	}
-	mux := http.NewServeMux()
-	mux.HandleFunc(NotifyPath, node.handleNotify)
-
+	go func() {
+		var err error
+		node.netListener, err = net.Listen("tcp", node.server.Addr)
+		if err != nil {
+			log.Printf("Node.Start() error:%v", err)
+		}
+		err = node.server.Serve(node.netListener)
+		if err != nil {
+			log.Printf("Node.Start() error:%v", err)
+		}
+	}()
 	return nil
 }
 
 func (node *Node) Stop() error {
-	return nil
+	if node.netListener != nil {
+		return node.netListener.Close()
+	} else {
+		return nil
+	}
 }
 
 func (node *Node) handleList(w http.ResponseWriter, r *http.Request) {
@@ -98,20 +126,32 @@ func (node *Node) handleNotify(w http.ResponseWriter, r *http.Request) {
 	decoder := json.NewDecoder(r.Body)
 	err := decoder.Decode(&info)
 	if err != nil {
-		log.Panic("Node notify error:%s", err.Error())
+		log.Printf("Node notify error:%s", err.Error())
 		return
 	}
 	if determineHostAddress(node.Info().Address, info.Address) != info.Address {
-		log.Panic("Invalid node notification: local %s, remote %s",
+		log.Printf("Invalid node notification: local %s, remote %s",
 			node.Info().Address, info.Address)
 		return
 	}
-
-	// TODO connect
+	nodeConnection, err := node.connect(info)
+	if err != nil {
+		log.Printf("node connect error:%v,%v", nodeConnection.Info().Address, err)
+	} else {
+		<-nodeConnection.transporter.Done
+	}
 }
 
-func (node *Node) handleConnect(ws *websocket.Conn) {
-
+func (node *Node) handleConnect(conn *websocket.Conn) {
+	decoder := gob.NewDecoder(conn)
+	var info interface{}
+	decoder.Decode(&info)
+	nodeConnection, err := node.setupConnection(conn, info.(NodeInfo))
+	if err != nil {
+		log.Printf("node connect error:%v,%v", nodeConnection.Info().Address, err)
+	} else {
+		<-nodeConnection.transporter.Done
+	}
 }
 
 func determineHostAddress(addr1 string, addr2 string) string {
@@ -125,43 +165,67 @@ func determineHostAddress(addr1 string, addr2 string) string {
 }
 
 type nodeHandler struct {
-	node       *Node
-	gobEncoder *gob.Encoder
-	gobDecoder *gob.Decoder
+	node           *Node
+	nodeConnection *NodeConnection
+	gobEncoder     *gob.Encoder
+	gobDecoder     *gob.Decoder
 }
 
-func newNodeHandler(node *Node, conn *websocket.Conn) *nodeHandler {
-	nodeHandler := nodeHandler{}
+func newNodeHandler(node *Node, nodeConnection *NodeConnection) *nodeHandler {
+	var nodeHandler nodeHandler
 	nodeHandler.node = node
-	nodeHandler.gobEncoder = gob.NewEncoder(conn)
-	nodeHandler.gobDecoder = gob.NewDecoder(conn)
+	nodeHandler.nodeConnection = nodeConnection
+	nodeHandler.gobEncoder = gob.NewEncoder(nodeConnection.conn)
+	nodeHandler.gobDecoder = gob.NewDecoder(nodeConnection.conn)
 	return &nodeHandler
 }
 
 func (nodeHandler *nodeHandler) Encode(message interface{}) error {
-	if reflect.TypeOf(message).Kind() == reflect.Ptr {
-		return nodeHandler.gobEncoder.Encode(message)
-	} else {
-		return nodeHandler.gobEncoder.Encode(&message)
+	return nodeHandler.gobEncoder.Encode(&message)
+}
+
+func (nodeHandler *nodeHandler) Decode(message interface{}) error {
+	return nodeHandler.gobDecoder.Decode(message)
+}
+
+func (nodeHandler *nodeHandler) Handle(err error) {
+	log.Printf("Node %v error:%v", nodeHandler.nodeConnection.conn.RemoteAddr(), err)
+}
+
+func (nodeHandler *nodeHandler) Dispatch(message interface{}) error {
+	return nil
+}
+
+func (node *Node) onNodeJoin(nodeConnection *NodeConnection) {
+	for i := 0; i < len(node.nodeJoinListeners); i++ {
+		listener := node.nodeJoinListeners[i]
+		listener(nodeConnection)
 	}
 }
 
-func (nodeHandler *nodeHandler) Decode() (message interface{}, err error) {
-	err = nodeHandler.gobDecoder.Decode(&message)
-	return message, err
+func (node *Node) setupConnection(conn *websocket.Conn, info NodeInfo) (*NodeConnection, error) {
+	nodeConnection := &NodeConnection{}
+	nodeConnection.info = info
+	nodeConnection.conn = conn
+	handler := newNodeHandler(node, nodeConnection)
+	node.mutex.Lock()
+	defer node.mutex.Unlock()
+	if _, ok := node.nodes[info.Address]; ok {
+		conn.Close()
+		return nil, errors.New("Conflict node:" + info.Address)
+	}
+	nodeConnection.transporter = message.NewTransporter(handler, handler, handler, handler)
+	nodeConnection.transporter.Start()
+	node.onNodeJoin(nodeConnection)
+	return nodeConnection, nil
 }
 
-func (node *Node) connect(info NodeInfo) error {
+func (node *Node) connect(info NodeInfo) (*NodeConnection, error) {
 	address := "ws://" + info.Address + ConnectPath
 	origin := "ws://" + node.Info().Address
 	conn, err := websocket.Dial(address, "", origin)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	node.mutex.Lock()
-	defer node.mutex.Unlock()
-	data := nodeData{}
-	data.info = info
-	data.conn = conn
-	return nil
+	return node.setupConnection(conn, info)
 }

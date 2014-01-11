@@ -40,7 +40,7 @@ func (transporter *Transporter) Start() error {
 	}
 
 	transporter.isRunning = true
-	done := make(chan bool)
+	done := make(chan bool, 1)
 	transporter.Done = done
 
 	//sending goroutine

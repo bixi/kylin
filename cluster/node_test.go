@@ -42,12 +42,12 @@ func TestNodeJoin(t *testing.T) {
 	done := make(chan bool)
 	var node1, node2 *Node
 	var result1, result2 string
-	onNodeJoin1 := func(info NodeInfo) {
-		result1 = info.Description
+	onNodeJoin1 := func(conn *NodeConnection) {
+		result1 = conn.Info().Description
 		done <- true
 	}
-	onNodeJoin2 := func(info NodeInfo) {
-		result2 = info.Description
+	onNodeJoin2 := func(conn *NodeConnection) {
+		result2 = conn.Info().Description
 		done <- true
 	}
 	node1, err := startTestingNode(config1, onNodeJoin1)
