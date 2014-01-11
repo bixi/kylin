@@ -58,7 +58,8 @@ func (transporter *Transporter) Start() error {
 	//receving goroutine
 	go func() {
 		for {
-			message, err := transporter.decoder.Decode()
+			var message interface{}
+			err := transporter.decoder.Decode(&message)
 			if err == nil {
 				transporter.dispatcher.Dispatch(message)
 			} else {

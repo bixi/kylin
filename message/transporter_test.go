@@ -38,12 +38,11 @@ func getEncoder(ws *websocket.Conn) Encoder {
 
 func getDecoder(ws *websocket.Conn) Decoder {
 	gobDecoder := gob.NewDecoder(ws)
-	decoder := func() (interface{}, error) {
-		var buf interface{}
-		err := gobDecoder.Decode(&buf)
-		return buf, err
-	}
-	return DecoderFunc(decoder)
+	return gobDecoder
+}
+
+type testStruct struct {
+	Value int
 }
 
 func TestTransporter(t *testing.T) {

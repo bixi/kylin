@@ -1,11 +1,11 @@
 package message
 
 type Decoder interface {
-	Decode() (message interface{}, err error)
+	Decode(message interface{}) error
 }
 
-type DecoderFunc func() (message interface{}, err error)
+type DecoderFunc func(message interface{}) error
 
-func (f DecoderFunc) Decode() (message interface{}, err error) {
-	return f()
+func (f DecoderFunc) Decode(message interface{}) error {
+	return f(message)
 }
