@@ -19,12 +19,10 @@ const (
 )
 
 type NodeJoinListener func(*NodeConnection)
-type MessageHandler func(message interface{}) (handled bool)
 
 type Node struct {
 	config            Config
 	nodeJoinListeners []NodeJoinListener
-	messageHandlers   []MessageHandler
 	nodes             map[string]*NodeConnection
 	server            *http.Server
 	netListener       net.Listener
@@ -134,11 +132,16 @@ func (node *Node) handleNotify(w http.ResponseWriter, r *http.Request) {
 			node.Info().Address, info.Address)
 		return
 	}
+	if node.isConnected(info.Address) {
+		return
+	}
 	nodeConnection, err := node.connect(info)
-	if err != nil {
-		log.Printf("node connect error:%v,%v", nodeConnection.Info().Address, err)
-	} else {
+	if err == nil {
+		node.addNode(nodeConnection)
+		nodeConnection.Send(node.Info())
 		<-nodeConnection.transporter.Done
+	} else {
+		log.Printf("node connect error:%v,%v", nodeConnection.Info().Address, err)
 	}
 }
 
@@ -148,9 +151,11 @@ func (node *Node) handleConnect(conn *websocket.Conn) {
 	decoder.Decode(&info)
 	nodeConnection, err := node.setupConnection(conn, info.(NodeInfo))
 	if err != nil {
-		log.Printf("node connect error:%v,%v", nodeConnection.Info().Address, err)
-	} else {
+		node.addNode(nodeConnection)
 		<-nodeConnection.transporter.Done
+	} else {
+		log.Printf("node connect error:%v,%v", nodeConnection.Info().Address, err)
+
 	}
 }
 
@@ -203,20 +208,27 @@ func (node *Node) onNodeJoin(nodeConnection *NodeConnection) {
 	}
 }
 
+func (node *Node) isConnected(address string) {
+	node.mutex.Lock()
+	defer node.mutex.Unlock()
+	_, ok := node.nodes[info.Address]
+	return ok
+}
+
+func (node *Node) addNode(nodeConnection *NodeConnection) {
+	node.mutex.Lock()
+	defer node.mutex.Unlock()
+	node.nodes[nodeConnection.Info().Address] = nodeConnection
+	node.onNodeJoin(nodeConnection)
+}
+
 func (node *Node) setupConnection(conn *websocket.Conn, info NodeInfo) (*NodeConnection, error) {
 	nodeConnection := &NodeConnection{}
 	nodeConnection.info = info
 	nodeConnection.conn = conn
 	handler := newNodeHandler(node, nodeConnection)
-	node.mutex.Lock()
-	defer node.mutex.Unlock()
-	if _, ok := node.nodes[info.Address]; ok {
-		conn.Close()
-		return nil, errors.New("Conflict node:" + info.Address)
-	}
 	nodeConnection.transporter = message.NewTransporter(handler, handler, handler, handler)
 	nodeConnection.transporter.Start()
-	node.onNodeJoin(nodeConnection)
 	return nodeConnection, nil
 }
 
