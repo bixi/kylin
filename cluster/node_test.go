@@ -63,9 +63,9 @@ func TestNodeJoin(t *testing.T) {
 	node1.Stop()
 	node2.Stop()
 	if result1 != "Comet2" {
-		t.Fail()
+		t.Error("TestNodeJoin failed.")
 	}
 	if result2 != "Comet1" {
-		t.Fail()
+		t.Error("TestNodeJoin failed.")
 	}
 }
