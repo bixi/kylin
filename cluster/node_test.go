@@ -29,7 +29,7 @@ func TestNodeList(t *testing.T) {
 	node.Stop()
 }
 
-func startTestingNode(config Config, onNodeJoin NodeJoinListener, onNodeDrop NodeDropListener) (*Node, error) {
+func startTestingNode(config Config, onNodeJoin NodeJoinListener, onNodeDrop NodeDropListener) (Node, error) {
 	node := NewNode(config)
 	if onNodeJoin != nil {
 		node.AddNodeJoinListener(onNodeJoin)
@@ -45,13 +45,13 @@ func TestNodeJoin(t *testing.T) {
 	config1 := Config{"localhost:12341", "Comet1", []string{"localhost:12342"}}
 	config2 := Config{"localhost:12342", "Comet2", []string{"localhost:12341"}}
 	done := make(chan bool)
-	var node1, node2 *Node
+	var node1, node2 Node
 	var result1, result2 string
-	onNodeJoin1 := func(conn *NodeConnection) {
+	onNodeJoin1 := func(conn NodeConnection) {
 		result1 = conn.Info().Description
 		done <- true
 	}
-	onNodeJoin2 := func(conn *NodeConnection) {
+	onNodeJoin2 := func(conn NodeConnection) {
 		result2 = conn.Info().Description
 		done <- true
 	}
@@ -79,18 +79,18 @@ func TestNodeDrop(t *testing.T) {
 	config1 := Config{"localhost:12341", "Comet1", []string{"localhost:12342"}}
 	config2 := Config{"localhost:12342", "Comet2", []string{"localhost:12341"}}
 	done := make(chan bool)
-	var node1, node2 *Node
+	var node1, node2 Node
 	var result1, result2 string
-	onNodeJoin1 := func(conn *NodeConnection) {
+	onNodeJoin1 := func(conn NodeConnection) {
 		conn.Stop()
 	}
-	onNodeJoin2 := func(conn *NodeConnection) {
+	onNodeJoin2 := func(conn NodeConnection) {
 	}
-	onNodeDrop1 := func(conn *NodeConnection) {
+	onNodeDrop1 := func(conn NodeConnection) {
 		result1 = conn.Info().Description
 		done <- true
 	}
-	onNodeDrop2 := func(conn *NodeConnection) {
+	onNodeDrop2 := func(conn NodeConnection) {
 		result2 = conn.Info().Description
 		done <- true
 	}

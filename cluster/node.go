@@ -6,7 +6,6 @@ import (
 	"encoding/gob"
 	"encoding/json"
 	"errors"
-	"github.com/bixi/kylin/message"
 	"io"
 	"log"
 	"net"
@@ -22,14 +21,24 @@ const (
 	ConnectPath = "/kylin/cluster/connect"
 )
 
-type NodeJoinListener func(*NodeConnection)
-type NodeDropListener func(*NodeConnection)
+type NodeJoinListener func(NodeConnection)
+type NodeDropListener func(NodeConnection)
 
-type Node struct {
+type Node interface {
+	Info() NodeInfo
+	Start() error
+	Stop() error
+	AddNodeJoinListener(NodeJoinListener)
+	AddNodeDropListener(NodeDropListener)
+	List() []NodeInfo
+	RegisterMessage(message interface{})
+}
+
+type node struct {
 	config            Config
 	nodeJoinListeners []NodeJoinListener
 	nodeDropListeners []NodeDropListener
-	nodes             map[string]*NodeConnection
+	nodes             map[string]NodeConnection
 	connectingNodes   map[string]bool
 	commandChan       chan func()
 	server            *http.Server
@@ -42,64 +51,64 @@ type Node struct {
 var innerMessagesRegistered = false
 var registerMutex = sync.Mutex{}
 
-func NewNode(config Config) *Node {
-	var node Node
-	node.config = config
-	node.nodes = make(map[string]*NodeConnection)
-	node.connectingNodes = make(map[string]bool)
-	node.nodeJoinListeners = make([]NodeJoinListener, 0, 1)
-	node.nodeDropListeners = make([]NodeDropListener, 0, 1)
-	node.commandChan = make(chan func(), 1000)
-	node.stopChan = make(chan bool, 1)
-	return &node
+func NewNode(config Config) Node {
+	var n node
+	n.config = config
+	n.nodes = make(map[string]NodeConnection)
+	n.connectingNodes = make(map[string]bool)
+	n.nodeJoinListeners = make([]NodeJoinListener, 0, 1)
+	n.nodeDropListeners = make([]NodeDropListener, 0, 1)
+	n.commandChan = make(chan func(), 1000)
+	n.stopChan = make(chan bool, 1)
+	return &n
 }
 
-func (node *Node) Info() NodeInfo {
-	return NodeInfo{node.config.Address, node.config.Description}
+func (n *node) Info() NodeInfo {
+	return NodeInfo{n.config.Address, n.config.Description}
 }
 
-func (node *Node) List() []NodeInfo {
+func (n *node) List() []NodeInfo {
 	resultChan := make(chan []NodeInfo)
 	command := func() {
-		list := make([]NodeInfo, 0, len(node.nodes)+1)
-		list = append(list, node.Info())
-		for _, value := range node.nodes {
-			list = append(list, value.info)
+		list := make([]NodeInfo, 0, len(n.nodes)+1)
+		list = append(list, n.Info())
+		for _, value := range n.nodes {
+			list = append(list, value.Info())
 		}
 		resultChan <- list
 	}
-	node.commandChan <- command
+	n.commandChan <- command
 	list := <-resultChan
 	return list
 }
 
-func (node *Node) AddNodeJoinListener(listener NodeJoinListener) {
-	node.mutex.Lock()
-	defer node.mutex.Unlock()
-	if node.isInitialized {
+func (n *node) AddNodeJoinListener(listener NodeJoinListener) {
+	n.mutex.Lock()
+	defer n.mutex.Unlock()
+	if n.isInitialized {
 		command := func() {
-			node.nodeJoinListeners = append(node.nodeJoinListeners, listener)
+			n.nodeJoinListeners = append(n.nodeJoinListeners, listener)
 		}
-		node.commandChan <- command
+		n.commandChan <- command
 	} else {
-		node.nodeJoinListeners = append(node.nodeJoinListeners, listener)
+		n.nodeJoinListeners = append(n.nodeJoinListeners, listener)
 	}
 }
 
-func (node *Node) AddNodeDropListener(listener NodeDropListener) {
-	node.mutex.Lock()
-	defer node.mutex.Unlock()
-	if node.isInitialized {
+func (n *node) AddNodeDropListener(listener NodeDropListener) {
+	n.mutex.Lock()
+	defer n.mutex.Unlock()
+	if n.isInitialized {
 		command := func() {
-			node.nodeDropListeners = append(node.nodeDropListeners, listener)
+			n.nodeDropListeners = append(n.nodeDropListeners, listener)
 		}
-		node.commandChan <- command
+		n.commandChan <- command
 	} else {
-		node.nodeDropListeners = append(node.nodeDropListeners, listener)
+		n.nodeDropListeners = append(n.nodeDropListeners, listener)
 	}
 }
 
-func (node *Node) RegisterMessage(message interface{}) {
+func (n *node) RegisterMessage(message interface{}) {
 	gob.Register(message)
 }
 
@@ -112,25 +121,25 @@ func registerInnerMessages() {
 	innerMessagesRegistered = true
 }
 
-func (node *Node) Start() error {
+func (n *node) Start() error {
 	registerInnerMessages()
-	node.mutex.Lock()
-	defer node.mutex.Unlock()
-	if node.isInitialized {
-		return errors.New("Node has started.")
+	n.mutex.Lock()
+	defer n.mutex.Unlock()
+	if n.isInitialized {
+		return errors.New("node has started.")
 	}
-	node.isInitialized = true
-	go node.loop()
+	n.isInitialized = true
+	go n.loop()
 	return nil
 }
 
-func (node *Node) Stop() error {
-	node.mutex.Lock()
-	defer node.mutex.Unlock()
-	if !node.isInitialized {
-		return errors.New("Node not started.")
+func (n *node) Stop() error {
+	n.mutex.Lock()
+	defer n.mutex.Unlock()
+	if !n.isInitialized {
+		return errors.New("node not started.")
 	}
-	node.stopChan <- true
+	n.stopChan <- true
 	return nil
 
 }
@@ -147,49 +156,49 @@ func getConnectUrl(address string) string {
 	return "ws://" + address + ConnectPath
 }
 
-func (node *Node) handleList(w http.ResponseWriter, r *http.Request) {
-	list := node.List()
+func (n *node) handleList(w http.ResponseWriter, r *http.Request) {
+	list := n.List()
 	encoder := json.NewEncoder(w)
 	err := encoder.Encode(list)
 	if err != nil {
-		log.Printf("Node list error:%s \n", err.Error())
+		log.Printf("node list error:%s \n", err.Error())
 	}
 }
 
-func (node *Node) handleNotify(w http.ResponseWriter, r *http.Request) {
+func (n *node) handleNotify(w http.ResponseWriter, r *http.Request) {
 	info, err := readNodeInfo(r.Body)
 	if err != nil {
-		log.Printf("Node notify error:%s \n", err.Error())
+		log.Printf("node notify error:%s \n", err.Error())
 		return
 	}
-	if determineHostAddress(node.Info().Address, info.Address) != info.Address {
-		log.Printf("Invalid node notification: local %s, remote %s \n",
-			node.Info().Address, info.Address)
+	if determineHostAddress(n.Info().Address, info.Address) != info.Address {
+		log.Printf("Invalid n notification: local %s, remote %s \n",
+			n.Info().Address, info.Address)
 		return
 	}
-	node.connectRoutine(info.Address)
+	n.connectRoutine(info.Address)
 }
 
-func (node *Node) handleConnect(conn *websocket.Conn) {
+func (n *node) handleConnect(conn *websocket.Conn) {
 	info, err := readNodeInfo(conn)
 	if err != nil {
 		log.Printf("handle connect error:%v,%v \n", conn.RemoteAddr(), err)
 		return
 	}
-	err = writeNodeInfo(node.Info(), conn)
+	err = writeNodeInfo(n.Info(), conn)
 	if err != nil {
 		log.Printf("handle connect error:%v,%v \n", conn.RemoteAddr(), err)
 		return
 	}
-	resultChan := make(chan *NodeConnection, 1)
+	resultChan := make(chan NodeConnection, 1)
 	nodeConnection := newNodeConnection(conn, info)
 	command := func() {
-		node.processNodeConnected(nodeConnection, resultChan)
+		n.processNodeConnected(nodeConnection, resultChan)
 	}
-	node.commandChan <- command
+	n.commandChan <- command
 	nodeConnection = <-resultChan
 	if nodeConnection != nil {
-		node.waitForClose(nodeConnection)
+		n.waitForClose(nodeConnection)
 	}
 }
 
@@ -204,8 +213,8 @@ func determineHostAddress(addr1 string, addr2 string) string {
 }
 
 type nodeHandler struct {
-	node           *Node
-	nodeConnection *NodeConnection
+	n              *node
+	nodeConnection NodeConnection
 	gobEncoder     *gob.Encoder
 	gobDecoder     *gob.Decoder
 }
@@ -223,11 +232,11 @@ func writeNodeInfo(info NodeInfo, w io.Writer) error {
 	return err
 }
 
-func newNodeHandler(nodeConnection *NodeConnection) *nodeHandler {
+func newNodeHandler(nodeConnection NodeConnection) *nodeHandler {
 	var nodeHandler nodeHandler
 	nodeHandler.nodeConnection = nodeConnection
-	nodeHandler.gobEncoder = gob.NewEncoder(nodeConnection.conn)
-	nodeHandler.gobDecoder = gob.NewDecoder(nodeConnection.conn)
+	nodeHandler.gobEncoder = gob.NewEncoder(nodeConnection.Conn())
+	nodeHandler.gobDecoder = gob.NewDecoder(nodeConnection.Conn())
 	return &nodeHandler
 }
 
@@ -240,121 +249,112 @@ func (nodeHandler *nodeHandler) Decode(message interface{}) error {
 }
 
 func (nodeHandler *nodeHandler) Handle(err error) {
-	log.Printf("Node %v error:%v \n", nodeHandler.nodeConnection.conn.RemoteAddr(), err)
+	log.Printf("node %v error:%v \n", nodeHandler.nodeConnection.Conn().RemoteAddr(), err)
 }
 
 func (nodeHandler *nodeHandler) Dispatch(message interface{}) error {
 	return nil
 }
 
-func (node *Node) onNodeJoin(nodeConnection *NodeConnection) {
-	for i := 0; i < len(node.nodeJoinListeners); i++ {
-		listener := node.nodeJoinListeners[i]
+func (n *node) onNodeJoin(nodeConnection NodeConnection) {
+	for i := 0; i < len(n.nodeJoinListeners); i++ {
+		listener := n.nodeJoinListeners[i]
 		listener(nodeConnection)
 	}
 }
 
-func (node *Node) onNodeDrop(nodeConnection *NodeConnection) {
-	for i := 0; i < len(node.nodeDropListeners); i++ {
-		listener := node.nodeDropListeners[i]
+func (n *node) onNodeDrop(nodeConnection NodeConnection) {
+	for i := 0; i < len(n.nodeDropListeners); i++ {
+		listener := n.nodeDropListeners[i]
 		listener(nodeConnection)
 	}
 }
 
-func (node *Node) isConnectedOrConnecting(address string) bool {
-	_, connected := node.nodes[address]
-	_, connecting := node.connectingNodes[address]
-	isMyself := address == node.Info().Address
+func (n *node) isConnectedOrConnecting(address string) bool {
+	_, connected := n.nodes[address]
+	_, connecting := n.connectingNodes[address]
+	isMyself := address == n.Info().Address
 	return connected || connecting || isMyself
 }
 
-func (node *Node) addNode(nodeConnection *NodeConnection) {
-	node.nodes[nodeConnection.Info().Address] = nodeConnection
+func (n *node) addNode(nodeConnection NodeConnection) {
+	n.nodes[nodeConnection.Info().Address] = nodeConnection
 }
 
-func (node *Node) removeNode(nodeConnection *NodeConnection) {
-	delete(node.nodes, nodeConnection.Info().Address)
-	node.onNodeDrop(nodeConnection)
+func (n *node) removeNode(nodeConnection NodeConnection) {
+	delete(n.nodes, nodeConnection.Info().Address)
+	n.onNodeDrop(nodeConnection)
 }
 
-func newNodeConnection(conn *websocket.Conn, info NodeInfo) *NodeConnection {
-	nodeConnection := &NodeConnection{}
-	nodeConnection.info = info
-	nodeConnection.conn = conn
-	handler := newNodeHandler(nodeConnection)
-	nodeConnection.transporter = message.NewTransporter(handler, handler, handler, handler)
-	return nodeConnection
+func (n *node) addConnecting(address string) {
+	n.connectingNodes[address] = true
 }
 
-func (node *Node) addConnecting(address string) {
-	node.connectingNodes[address] = true
-}
-
-func (node *Node) processNodeConnected(nodeConnection *NodeConnection, resultChan chan *NodeConnection) {
+func (n *node) processNodeConnected(nodeConnection NodeConnection, resultChan chan NodeConnection) {
 	err := nodeConnection.Start()
 	if err != nil {
-		log.Printf("node connect error:%v,%v \n", nodeConnection.Info().Address, err)
+		log.Printf("n connect error:%v,%v \n", nodeConnection.Info().Address, err)
 		resultChan <- nil
 		return
 	}
-	node.addNode(nodeConnection)
-	node.onNodeJoin(nodeConnection)
+	n.addNode(nodeConnection)
+	n.onNodeJoin(nodeConnection)
 	resultChan <- nodeConnection
 }
 
-func (node *Node) removeConnecting(address string) {
-	delete(node.connectingNodes, address)
+func (n *node) removeConnecting(address string) {
+	delete(n.connectingNodes, address)
 }
 
 type connectResult struct {
-	nodeConnection *NodeConnection
+	nodeConnection NodeConnection
 	err            error
 }
 
-func (node *Node) connectRoutine(address string) {
-	resultChan := make(chan *NodeConnection, 1)
+func (n *node) connectRoutine(address string) {
+	resultChan := make(chan NodeConnection, 1)
 	command := func() {
-		if node.isConnectedOrConnecting(address) {
+		if n.isConnectedOrConnecting(address) {
 			resultChan <- nil
 			return
 		}
-		node.addConnecting(address)
-		node.connectAsync(address, func(nodeConnection *NodeConnection, err error) {
-			node.removeConnecting(address)
+		n.addConnecting(address)
+		n.connectAsync(address, func(nodeConnection NodeConnection, err error) {
+			n.removeConnecting(address)
 			if err != nil {
-				log.Printf("node connect error:%v,%v \n", address, err)
+				log.Printf("n connect error:%v,%v \n", address, err)
 				resultChan <- nil
 				return
 			}
-			node.processNodeConnected(nodeConnection, resultChan)
+			n.processNodeConnected(nodeConnection, resultChan)
 		})
 	}
-	node.commandChan <- command
+	n.commandChan <- command
 	nodeConnection := <-resultChan
 	if nodeConnection != nil {
-		node.waitForClose(nodeConnection)
+		n.waitForClose(nodeConnection)
 	}
 }
 
-func (node *Node) waitForClose(nodeConnection *NodeConnection) {
-	<-nodeConnection.transporter.Done
+func (n *node) waitForClose(nodeConnection NodeConnection) {
+	nodeConnection.WaitForDone()
 	command := func() {
-		node.removeNode(nodeConnection)
+		n.removeNode(nodeConnection)
 	}
-	node.commandChan <- command
+	n.commandChan <- command
 }
 
-func (node *Node) connectAsync(address string, callback func(*NodeConnection, error)) {
+func (n *node) connectAsync(address string, callback func(NodeConnection, error)) {
 	go func() {
-		n, e := connect(address, node.Info())
+		nc, e := connect(address, n.Info())
 		command := func() {
-			callback(n, e)
+			callback(nc, e)
 		}
-		node.commandChan <- command
+		n.commandChan <- command
 	}()
 }
 
-func connect(address string, localInfo NodeInfo) (*NodeConnection, error) {
+func connect(address string, localInfo NodeInfo) (NodeConnection, error) {
 	url := getConnectUrl(address)
 	origin := "ws://" + localInfo.Address
 	conn, err := websocket.Dial(url, "", origin)
@@ -374,32 +374,32 @@ func connect(address string, localInfo NodeInfo) (*NodeConnection, error) {
 	return newNodeConnection(conn, remoteInfo), nil
 }
 
-func (node *Node) notify(address string) {
+func (n *node) notify(address string) {
 	go func() {
 		url := getNotifyUrl(address)
 		buffer := &bytes.Buffer{}
-		err := writeNodeInfo(node.Info(), buffer)
+		err := writeNodeInfo(n.Info(), buffer)
 		if err == nil {
 			http.Post(url, "application/json", strings.NewReader(string(buffer.Bytes())))
 		} else {
-			log.Printf("Write node info error:%v \n", err)
+			log.Printf("Write n info error:%v \n", err)
 		}
 	}()
 }
 
-func (node *Node) listenAndServe() {
+func (n *node) listenAndServe() {
 	mux := http.NewServeMux()
-	mux.HandleFunc(NotifyPath, node.handleNotify)
-	mux.HandleFunc(ListPath, node.handleList)
-	mux.Handle(ConnectPath, websocket.Handler(node.handleConnect))
-	node.server = &http.Server{Addr: node.config.Address, Handler: mux}
+	mux.HandleFunc(NotifyPath, n.handleNotify)
+	mux.HandleFunc(ListPath, n.handleList)
+	mux.Handle(ConnectPath, websocket.Handler(n.handleConnect))
+	n.server = &http.Server{Addr: n.config.Address, Handler: mux}
 	var err error
-	node.netListener, err = net.Listen("tcp", node.server.Addr)
+	n.netListener, err = net.Listen("tcp", n.server.Addr)
 	if err != nil {
 		log.Printf("net.Listen error:%v \n", err)
 		return
 	}
-	err = node.server.Serve(node.netListener)
+	err = n.server.Serve(n.netListener)
 	if err != nil {
 		if !strings.Contains(err.Error(), "use of closed network connection") {
 			log.Printf("server.Serve error:%v \n", err)
@@ -408,39 +408,39 @@ func (node *Node) listenAndServe() {
 	}
 }
 
-func (node *Node) detectNodes(remoteAddresses []string) {
+func (n *node) detectNodes(remoteAddresses []string) {
 	for _, remoteAddress := range remoteAddresses {
-		node.detectNode(remoteAddress)
+		n.detectNode(remoteAddress)
 	}
 }
 
-func (node *Node) detectNode(remoteAddress string) {
-	if node.isConnectedOrConnecting(remoteAddress) {
+func (n *node) detectNode(remoteAddress string) {
+	if n.isConnectedOrConnecting(remoteAddress) {
 		return
 	}
-	myAddress := node.Info().Address
+	myAddress := n.Info().Address
 	hostAddress := determineHostAddress(myAddress, remoteAddress)
 	if hostAddress == myAddress {
-		node.notify(remoteAddress)
+		n.notify(remoteAddress)
 	} else if hostAddress == remoteAddress {
-		go node.connectRoutine(hostAddress)
+		go n.connectRoutine(hostAddress)
 	}
 }
 
-func (node *Node) loop() {
-	go node.listenAndServe()
-	node.detectNodes(node.config.Nodes)
+func (n *node) loop() {
+	go n.listenAndServe()
+	n.detectNodes(n.config.Nodes)
 	ticker := time.NewTicker(15 * time.Second)
 	defer ticker.Stop()
 	for {
 		select {
-		case command := <-node.commandChan:
+		case command := <-n.commandChan:
 			command()
 		case <-ticker.C:
-			node.detectNodes(node.config.Nodes)
-		case <-node.stopChan:
-			if node.netListener != nil {
-				err := node.netListener.Close()
+			n.detectNodes(n.config.Nodes)
+		case <-n.stopChan:
+			if n.netListener != nil {
+				err := n.netListener.Close()
 				if err != nil {
 					log.Printf("Close net listener error:%v \n", err)
 				}

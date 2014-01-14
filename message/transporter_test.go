@@ -10,7 +10,7 @@ import (
 
 // echo back the websocket.
 func testTransporterEchoServer(ws *websocket.Conn) {
-	var transporter *Transporter
+	var transporter Transporter
 	onMessage := DispatcherFunc(func(message interface{}) error {
 		transporter.Send(message)
 		transporter.Stop()
@@ -21,7 +21,7 @@ func testTransporterEchoServer(ws *websocket.Conn) {
 	})
 	transporter = NewTransporter(getEncoder(ws), getDecoder(ws), onMessage, onError)
 	transporter.Start()
-	<-transporter.Done
+	transporter.WaitForDone()
 }
 
 type testMessage struct {
@@ -60,7 +60,7 @@ func TestTransporter(t *testing.T) {
 		t.Fatal(err.Error())
 	}
 
-	var transporter *Transporter
+	var transporter Transporter
 	var result string
 
 	onMessage := DispatcherFunc(func(message interface{}) error {
@@ -74,7 +74,7 @@ func TestTransporter(t *testing.T) {
 	transporter = NewTransporter(getEncoder(ws), getDecoder(ws), onMessage, onError)
 	transporter.Start()
 	transporter.Send(&testMessage{"Hello"})
-	<-transporter.Done
+	transporter.WaitForDone()
 	if result != "Hello" {
 		t.Fail()
 	}

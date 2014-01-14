@@ -7,8 +7,15 @@ import (
 	"sync"
 )
 
-type Transporter struct {
-	Done         <-chan bool
+type Transporter interface {
+	Start() error
+	Stop() error
+	Send(message interface{})
+	WaitForDone()
+}
+
+type transporter struct {
+	done         <-chan bool
 	mutex        sync.Mutex
 	encoder      Encoder
 	decoder      Decoder
@@ -22,33 +29,33 @@ type Transporter struct {
 func NewTransporter(encoder Encoder,
 	decoder Decoder,
 	dispatcher Dispatcher,
-	errorHandler ErrorHandler) *Transporter {
-	var transporter Transporter
-	transporter.encoder = encoder
-	transporter.decoder = decoder
-	transporter.dispatcher = dispatcher
-	transporter.errorHandler = errorHandler
-	transporter.sendbox = make(chan []interface{}, 1)
-	return &transporter
+	errorHandler ErrorHandler) Transporter {
+	var t transporter
+	t.encoder = encoder
+	t.decoder = decoder
+	t.dispatcher = dispatcher
+	t.errorHandler = errorHandler
+	t.sendbox = make(chan []interface{}, 1)
+	return &t
 }
 
-func (transporter *Transporter) Start() error {
-	transporter.mutex.Lock()
-	defer transporter.mutex.Unlock()
-	if transporter.isRunning {
-		return errors.New("Transporter is running.")
+func (t *transporter) Start() error {
+	t.mutex.Lock()
+	defer t.mutex.Unlock()
+	if t.isRunning {
+		return errors.New("transporter is running.")
 	}
 
-	transporter.isRunning = true
+	t.isRunning = true
 	done := make(chan bool, 1)
-	transporter.Done = done
+	t.done = done
 
 	//sending goroutine
 	go func() {
-		for messages := range transporter.sendbox {
-			err := transporter.processSendingMessages(messages)
+		for messages := range t.sendbox {
+			err := t.processSendingMessages(messages)
 			if err != nil {
-				transporter.handleError(err)
+				t.handleError(err)
 				break
 			}
 		}
@@ -59,12 +66,12 @@ func (transporter *Transporter) Start() error {
 	go func() {
 		for {
 			var message interface{}
-			err := transporter.decoder.Decode(&message)
+			err := t.decoder.Decode(&message)
 			if err == nil {
-				transporter.dispatcher.Dispatch(message)
+				t.dispatcher.Dispatch(message)
 			} else {
-				transporter.handleError(err)
-				transporter.Stop()
+				t.handleError(err)
+				t.Stop()
 				return
 			}
 		}
@@ -73,28 +80,32 @@ func (transporter *Transporter) Start() error {
 	return nil
 }
 
-func (transporter *Transporter) Send(message interface{}) {
-	transporter.mutex.Lock()
-	defer transporter.mutex.Unlock()
+func (t *transporter) Send(message interface{}) {
+	t.mutex.Lock()
+	defer t.mutex.Unlock()
 	select {
-	case messages := <-transporter.sendbox:
+	case messages := <-t.sendbox:
 		messages = append(messages, message)
-		transporter.sendbox <- messages
+		t.sendbox <- messages
 	default:
 		messages := []interface{}{message}
-		transporter.sendbox <- messages
+		t.sendbox <- messages
 	}
 }
 
-func (transporter *Transporter) Stop() error {
-	transporter.mutex.Lock()
-	defer transporter.mutex.Unlock()
-	if transporter.isStopped {
-		return errors.New("Transporter has stopped.")
+func (t *transporter) Stop() error {
+	t.mutex.Lock()
+	defer t.mutex.Unlock()
+	if t.isStopped {
+		return errors.New("transporter has stopped.")
 	}
-	transporter.isStopped = true
-	close(transporter.sendbox)
+	t.isStopped = true
+	close(t.sendbox)
 	return nil
+}
+
+func (t *transporter) WaitForDone() {
+	<-t.done
 }
 
 func shouldReport(err error) bool {
@@ -110,9 +121,9 @@ func shouldReport(err error) bool {
 	return true
 }
 
-func (transporter *Transporter) processSendingMessages(messages []interface{}) error {
+func (t *transporter) processSendingMessages(messages []interface{}) error {
 	for _, message := range messages {
-		err := transporter.encoder.Encode(message)
+		err := t.encoder.Encode(message)
 		if err != nil {
 			return err
 		}
@@ -120,10 +131,10 @@ func (transporter *Transporter) processSendingMessages(messages []interface{}) e
 	return nil
 }
 
-func (transporter *Transporter) handleError(err error) {
-	if transporter.errorHandler != nil {
+func (t *transporter) handleError(err error) {
+	if t.errorHandler != nil {
 		if shouldReport(err) {
-			transporter.errorHandler.Handle(err)
+			t.errorHandler.Handle(err)
 		}
 	}
 }
