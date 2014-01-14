@@ -28,6 +28,7 @@ type Node interface {
 	Info() NodeInfo
 	Start() error
 	Stop() error
+	WaitForDone()
 	AddNodeJoinListener(NodeJoinListener)
 	AddNodeDropListener(NodeDropListener)
 	List() []NodeInfo
@@ -45,6 +46,7 @@ type node struct {
 	netListener       net.Listener
 	isInitialized     bool
 	stopChan          chan bool
+	done              chan bool
 	mutex             sync.Mutex
 }
 
@@ -60,6 +62,7 @@ func NewNode(config Config) Node {
 	n.nodeDropListeners = make([]NodeDropListener, 0, 1)
 	n.commandChan = make(chan func(), 1000)
 	n.stopChan = make(chan bool, 1)
+	n.done = make(chan bool, 1)
 	return &n
 }
 
@@ -110,6 +113,10 @@ func (n *node) AddNodeDropListener(listener NodeDropListener) {
 
 func (n *node) RegisterMessage(message interface{}) {
 	gob.Register(message)
+}
+
+func (n *node) WaitForDone() {
+	<-n.done
 }
 
 func registerInnerMessages() {
@@ -439,12 +446,16 @@ func (n *node) loop() {
 		case <-ticker.C:
 			n.detectNodes(n.config.Nodes)
 		case <-n.stopChan:
+			for _, nc := range n.nodes {
+				nc.Stop()
+			}
 			if n.netListener != nil {
 				err := n.netListener.Close()
 				if err != nil {
 					log.Printf("Close net listener error:%v \n", err)
 				}
 			}
+			n.done <- true
 			break
 		}
 	}
