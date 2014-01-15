@@ -18,11 +18,11 @@ type NodeConnection interface {
 }
 
 type nodeConnection struct {
+	sync.Mutex
 	info            NodeInfo
 	transporter     message.Transporter
 	conn            *websocket.Conn
 	messageHandlers []MessageHandler
-	mutex           sync.Mutex
 }
 
 type MessageHandler func(message interface{}) (handled bool)
@@ -56,14 +56,14 @@ func (nc *nodeConnection) Send(message interface{}) {
 }
 
 func (nc *nodeConnection) AddMessageHandler(handler MessageHandler) {
-	nc.mutex.Lock()
-	defer nc.mutex.Unlock()
+	nc.Lock()
+	defer nc.Unlock()
 	nc.messageHandlers = append(nc.messageHandlers, handler)
 }
 
 func (nc *nodeConnection) Dispatch(message interface{}) {
-	nc.mutex.Lock()
-	defer nc.mutex.Unlock()
+	nc.Lock()
+	defer nc.Unlock()
 	for i := 0; i < len(nc.messageHandlers); i++ {
 		if nc.messageHandlers[i](message) {
 			break

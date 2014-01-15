@@ -36,6 +36,7 @@ type Node interface {
 }
 
 type node struct {
+	sync.Mutex
 	config            Config
 	nodeJoinListeners []NodeJoinListener
 	nodeDropListeners []NodeDropListener
@@ -47,7 +48,6 @@ type node struct {
 	isInitialized     bool
 	stopChan          chan bool
 	done              chan bool
-	mutex             sync.Mutex
 }
 
 var innerMessagesRegistered = false
@@ -86,8 +86,8 @@ func (n *node) List() []NodeInfo {
 }
 
 func (n *node) AddNodeJoinListener(listener NodeJoinListener) {
-	n.mutex.Lock()
-	defer n.mutex.Unlock()
+	n.Lock()
+	defer n.Unlock()
 	if n.isInitialized {
 		command := func() {
 			n.nodeJoinListeners = append(n.nodeJoinListeners, listener)
@@ -99,8 +99,8 @@ func (n *node) AddNodeJoinListener(listener NodeJoinListener) {
 }
 
 func (n *node) AddNodeDropListener(listener NodeDropListener) {
-	n.mutex.Lock()
-	defer n.mutex.Unlock()
+	n.Lock()
+	defer n.Unlock()
 	if n.isInitialized {
 		command := func() {
 			n.nodeDropListeners = append(n.nodeDropListeners, listener)
@@ -130,8 +130,8 @@ func registerInnerMessages() {
 
 func (n *node) Start() error {
 	registerInnerMessages()
-	n.mutex.Lock()
-	defer n.mutex.Unlock()
+	n.Lock()
+	defer n.Unlock()
 	if n.isInitialized {
 		return errors.New("node has started.")
 	}
@@ -141,8 +141,8 @@ func (n *node) Start() error {
 }
 
 func (n *node) Stop() error {
-	n.mutex.Lock()
-	defer n.mutex.Unlock()
+	n.Lock()
+	defer n.Unlock()
 	if !n.isInitialized {
 		return errors.New("node not started.")
 	}

@@ -15,8 +15,8 @@ type Transporter interface {
 }
 
 type transporter struct {
+	sync.Mutex
 	done         <-chan bool
-	mutex        sync.Mutex
 	encoder      Encoder
 	decoder      Decoder
 	dispatcher   Dispatcher
@@ -40,8 +40,8 @@ func NewTransporter(encoder Encoder,
 }
 
 func (t *transporter) Start() error {
-	t.mutex.Lock()
-	defer t.mutex.Unlock()
+	t.Lock()
+	defer t.Unlock()
 	if t.isRunning {
 		return errors.New("transporter is running.")
 	}
@@ -81,8 +81,8 @@ func (t *transporter) Start() error {
 }
 
 func (t *transporter) Send(message interface{}) {
-	t.mutex.Lock()
-	defer t.mutex.Unlock()
+	t.Lock()
+	defer t.Unlock()
 	select {
 	case messages := <-t.sendbox:
 		messages = append(messages, message)
@@ -94,8 +94,8 @@ func (t *transporter) Send(message interface{}) {
 }
 
 func (t *transporter) Stop() error {
-	t.mutex.Lock()
-	defer t.mutex.Unlock()
+	t.Lock()
+	defer t.Unlock()
 	if t.isStopped {
 		return errors.New("transporter has stopped.")
 	}
