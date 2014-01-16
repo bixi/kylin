@@ -116,8 +116,8 @@ func (n *node) RegisterMessage(message interface{}) {
 }
 
 func (n *node) WaitForDone() {
+	defer recover()
 	<-n.done
-	recover()
 }
 
 func registerInnerMessages() {
@@ -147,9 +147,7 @@ func (n *node) Stop() error {
 	if !n.isInitialized {
 		return errors.New("node not started.")
 	}
-	defer func() {
-		recover()
-	}()
+	defer recover()
 	close(n.stopChan)
 	return nil
 }
@@ -458,9 +456,7 @@ func (n *node) loop() {
 					log.Printf("Close net listener error:%v \n", err)
 				}
 			}
-			defer func() {
-				recover()
-			}()
+			defer recover()
 			close(n.done)
 			return
 		}
