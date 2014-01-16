@@ -16,7 +16,7 @@ type Transporter interface {
 
 type transporter struct {
 	sync.Mutex
-	done         <-chan bool
+	done         chan struct{}
 	encoder      Encoder
 	decoder      Decoder
 	dispatcher   Dispatcher
@@ -47,8 +47,7 @@ func (t *transporter) Start() error {
 	}
 
 	t.isRunning = true
-	done := make(chan bool, 1)
-	t.done = done
+	t.done = make(chan struct{}, 1)
 
 	//sending goroutine
 	go func() {
@@ -59,7 +58,7 @@ func (t *transporter) Start() error {
 				break
 			}
 		}
-		done <- true
+		close(t.done)
 	}()
 
 	//receving goroutine
@@ -105,7 +104,9 @@ func (t *transporter) Stop() error {
 }
 
 func (t *transporter) WaitForDone() {
+	defer recover()
 	<-t.done
+
 }
 
 func shouldReport(err error) bool {

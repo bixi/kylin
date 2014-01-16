@@ -46,8 +46,8 @@ type node struct {
 	server            *http.Server
 	netListener       net.Listener
 	isInitialized     bool
-	stopChan          chan bool
-	done              chan bool
+	stopChan          chan struct{}
+	done              chan struct{}
 }
 
 var innerMessagesRegistered = false
@@ -61,8 +61,8 @@ func NewNode(config Config) Node {
 	n.nodeJoinListeners = make([]NodeJoinListener, 0, 1)
 	n.nodeDropListeners = make([]NodeDropListener, 0, 1)
 	n.commandChan = make(chan func(), 1000)
-	n.stopChan = make(chan bool, 1)
-	n.done = make(chan bool, 1)
+	n.stopChan = make(chan struct{}, 1)
+	n.done = make(chan struct{}, 1)
 	return &n
 }
 
@@ -117,6 +117,7 @@ func (n *node) RegisterMessage(message interface{}) {
 
 func (n *node) WaitForDone() {
 	<-n.done
+	recover()
 }
 
 func registerInnerMessages() {
@@ -146,9 +147,11 @@ func (n *node) Stop() error {
 	if !n.isInitialized {
 		return errors.New("node not started.")
 	}
-	n.stopChan <- true
+	defer func() {
+		recover()
+	}()
+	close(n.stopChan)
 	return nil
-
 }
 
 func getNotifyUrl(address string) string {
@@ -393,25 +396,24 @@ func (n *node) notify(address string) {
 		}
 	}()
 }
-
-func (n *node) listenAndServe() {
+func (n *node) listen() {
+	var err error
+	n.netListener, err = net.Listen("tcp", n.config.Address)
+	if err != nil {
+		log.Printf("net.Listen error:%v \n", err)
+	}
+}
+func (n *node) serve() {
 	mux := http.NewServeMux()
 	mux.HandleFunc(NotifyPath, n.handleNotify)
 	mux.HandleFunc(ListPath, n.handleList)
 	mux.Handle(ConnectPath, websocket.Handler(n.handleConnect))
 	n.server = &http.Server{Addr: n.config.Address, Handler: mux}
-	var err error
-	n.netListener, err = net.Listen("tcp", n.server.Addr)
-	if err != nil {
-		log.Printf("net.Listen error:%v \n", err)
-		return
-	}
-	err = n.server.Serve(n.netListener)
+	err := n.server.Serve(n.netListener)
 	if err != nil {
 		if !strings.Contains(err.Error(), "use of closed network connection") {
 			log.Printf("server.Serve error:%v \n", err)
 		}
-		return
 	}
 }
 
@@ -435,7 +437,8 @@ func (n *node) detectNode(remoteAddress string) {
 }
 
 func (n *node) loop() {
-	go n.listenAndServe()
+	n.listen()
+	go n.serve()
 	n.detectNodes(n.config.Nodes)
 	ticker := time.NewTicker(15 * time.Second)
 	defer ticker.Stop()
@@ -455,8 +458,11 @@ func (n *node) loop() {
 					log.Printf("Close net listener error:%v \n", err)
 				}
 			}
-			n.done <- true
-			break
+			defer func() {
+				recover()
+			}()
+			close(n.done)
+			return
 		}
 	}
 }
