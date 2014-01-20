@@ -117,7 +117,7 @@ func shouldReport(err error) bool {
 func (t *transporter) handleError(err error) {
 	if t.errorHandler != nil {
 		if shouldReport(err) {
-			t.errorHandler.Handle(err)
+			t.errorHandler.OnError(err)
 		}
 	}
 }

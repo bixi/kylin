@@ -1,11 +1,11 @@
 package message
 
 type ErrorHandler interface {
-	Handle(error)
+	OnError(error)
 }
 
 type ErrorHandlerFunc func(error)
 
-func (f ErrorHandlerFunc) Handle(err error) {
+func (f ErrorHandlerFunc) OnError(err error) {
 	f(err)
 }

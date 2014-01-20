@@ -199,7 +199,7 @@ func (n *node) handleConnect(conn *websocket.Conn) {
 		return
 	}
 	resultChan := make(chan NodeConnection, 1)
-	nodeConnection := newNodeConnection(conn, info)
+	nodeConnection := newNodeConnection(n, conn, info)
 	command := func() {
 		n.processNodeConnected(nodeConnection, resultChan)
 	}
@@ -220,13 +220,6 @@ func determineHostAddress(addr1 string, addr2 string) string {
 	}
 }
 
-type nodeHandler struct {
-	n              *node
-	nodeConnection NodeConnection
-	gobEncoder     *gob.Encoder
-	gobDecoder     *gob.Decoder
-}
-
 func readNodeInfo(r io.Reader) (NodeInfo, error) {
 	decoder := json.NewDecoder(r)
 	var info NodeInfo
@@ -238,30 +231,6 @@ func writeNodeInfo(info NodeInfo, w io.Writer) error {
 	encoder := json.NewEncoder(w)
 	err := encoder.Encode(info)
 	return err
-}
-
-func newNodeHandler(nodeConnection NodeConnection) *nodeHandler {
-	var nodeHandler nodeHandler
-	nodeHandler.nodeConnection = nodeConnection
-	nodeHandler.gobEncoder = gob.NewEncoder(nodeConnection.Conn())
-	nodeHandler.gobDecoder = gob.NewDecoder(nodeConnection.Conn())
-	return &nodeHandler
-}
-
-func (nodeHandler *nodeHandler) Encode(message interface{}) error {
-	return nodeHandler.gobEncoder.Encode(&message)
-}
-
-func (nodeHandler *nodeHandler) Decode(message interface{}) error {
-	return nodeHandler.gobDecoder.Decode(message)
-}
-
-func (nodeHandler *nodeHandler) Handle(err error) {
-	log.Printf("node %v error:%v \n", nodeHandler.nodeConnection.Conn().RemoteAddr(), err)
-}
-
-func (nodeHandler *nodeHandler) Dispatch(message interface{}) error {
-	return nil
 }
 
 func (n *node) onNodeJoin(nodeConnection NodeConnection) {
@@ -354,7 +323,7 @@ func (n *node) waitForClose(nodeConnection NodeConnection) {
 
 func (n *node) connectAsync(address string, callback func(NodeConnection, error)) {
 	go func() {
-		nc, e := connect(address, n.Info())
+		nc, e := n.connect(address, n.Info())
 		command := func() {
 			callback(nc, e)
 		}
@@ -362,7 +331,7 @@ func (n *node) connectAsync(address string, callback func(NodeConnection, error)
 	}()
 }
 
-func connect(address string, localInfo NodeInfo) (NodeConnection, error) {
+func (n *node) connect(address string, localInfo NodeInfo) (NodeConnection, error) {
 	url := getConnectUrl(address)
 	origin := "ws://" + localInfo.Address
 	conn, err := websocket.Dial(url, "", origin)
@@ -379,7 +348,7 @@ func connect(address string, localInfo NodeInfo) (NodeConnection, error) {
 		conn.Close()
 		return nil, err
 	}
-	return newNodeConnection(conn, remoteInfo), nil
+	return newNodeConnection(n, conn, remoteInfo), nil
 }
 
 func (n *node) notify(address string) {
