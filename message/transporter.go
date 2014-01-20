@@ -2,6 +2,7 @@ package message
 
 import (
 	"errors"
+	"github.com/bixi/kylin/utility"
 	"io"
 	"strings"
 	"sync"
@@ -21,7 +22,7 @@ type transporter struct {
 	decoder      Decoder
 	dispatcher   Dispatcher
 	errorHandler ErrorHandler
-	sendbox      chan []interface{}
+	sendbox      utility.NonblockingChan
 	isRunning    bool
 	isStopped    bool
 }
@@ -35,7 +36,7 @@ func NewTransporter(encoder Encoder,
 	t.decoder = decoder
 	t.dispatcher = dispatcher
 	t.errorHandler = errorHandler
-	t.sendbox = make(chan []interface{}, 1)
+	t.sendbox = utility.NewNonblockingChan(128)
 	return &t
 }
 
@@ -51,8 +52,8 @@ func (t *transporter) Start() error {
 
 	//sending goroutine
 	go func() {
-		for messages := range t.sendbox {
-			err := t.processSendingMessages(messages)
+		for message := range t.sendbox.In {
+			err := t.encoder.Encode(message)
 			if err != nil {
 				t.handleError(err)
 				break
@@ -80,16 +81,7 @@ func (t *transporter) Start() error {
 }
 
 func (t *transporter) Send(message interface{}) {
-	t.Lock()
-	defer t.Unlock()
-	select {
-	case messages := <-t.sendbox:
-		messages = append(messages, message)
-		t.sendbox <- messages
-	default:
-		messages := []interface{}{message}
-		t.sendbox <- messages
-	}
+	t.sendbox.Out <- message
 }
 
 func (t *transporter) Stop() error {
@@ -99,7 +91,7 @@ func (t *transporter) Stop() error {
 		return errors.New("transporter has stopped.")
 	}
 	t.isStopped = true
-	close(t.sendbox)
+	t.sendbox.Close()
 	return nil
 }
 
@@ -120,16 +112,6 @@ func shouldReport(err error) bool {
 		return false
 	}
 	return true
-}
-
-func (t *transporter) processSendingMessages(messages []interface{}) error {
-	for _, message := range messages {
-		err := t.encoder.Encode(message)
-		if err != nil {
-			return err
-		}
-	}
-	return nil
 }
 
 func (t *transporter) handleError(err error) {

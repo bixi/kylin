@@ -330,7 +330,7 @@ func (n *node) connectRoutine(address string) {
 		n.connectAsync(address, func(nodeConnection NodeConnection, err error) {
 			n.removeConnecting(address)
 			if err != nil {
-				log.Printf("n connect error:%v,%v \n", address, err)
+				log.Printf("node connect error:%v,%v \n", address, err)
 				resultChan <- nil
 				return
 			}
