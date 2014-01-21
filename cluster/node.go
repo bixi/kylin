@@ -10,6 +10,7 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -453,6 +454,13 @@ func (n *node) loop() {
 				err := n.netListener.Close()
 				if err != nil {
 					log.Printf("Close net listener error:%v \n", err)
+				}
+			}
+			for {
+				if len(n.connectingNodes) > 0 || len(n.nodes) > 0 {
+					runtime.Gosched()
+				} else {
+					break
 				}
 			}
 			defer recover()
