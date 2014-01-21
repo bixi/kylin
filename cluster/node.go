@@ -10,7 +10,6 @@ import (
 	"log"
 	"net"
 	"net/http"
-	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -440,32 +439,37 @@ func (n *node) loop() {
 	n.detectNodes(n.config.Nodes)
 	ticker := time.NewTicker(15 * time.Second)
 	defer ticker.Stop()
+	isStopped := false
 	for {
-		select {
-		case command := <-n.commandChan:
-			command()
-		case <-ticker.C:
-			n.detectNodes(n.config.Nodes)
-		case <-n.stopChan:
-			for _, nc := range n.nodes {
-				nc.Stop()
-			}
-			if n.netListener != nil {
-				err := n.netListener.Close()
-				if err != nil {
-					log.Printf("Close net listener error:%v \n", err)
+		if isStopped {
+			select {
+			case command := <-n.commandChan:
+				command()
+			default:
+				if len(n.connectingNodes) == 0 && len(n.nodes) == 0 {
+					defer recover()
+					close(n.done)
+					return
 				}
 			}
-			for {
-				if len(n.connectingNodes) > 0 || len(n.nodes) > 0 {
-					runtime.Gosched()
-				} else {
-					break
+		} else {
+			select {
+			case command := <-n.commandChan:
+				command()
+			case <-ticker.C:
+				n.detectNodes(n.config.Nodes)
+			case <-n.stopChan:
+				for _, nc := range n.nodes {
+					nc.Stop()
 				}
+				if n.netListener != nil {
+					err := n.netListener.Close()
+					if err != nil {
+						log.Printf("Close net listener error:%v \n", err)
+					}
+				}
+				isStopped = true
 			}
-			defer recover()
-			close(n.done)
-			return
 		}
 	}
 }
