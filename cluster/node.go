@@ -54,9 +54,6 @@ type nodeFoundMessage struct {
 	Address string
 }
 
-var innerMessagesRegistered = false
-var registerMutex = sync.Mutex{}
-
 func NewNode(config Config) Node {
 	var n node
 	n.config = config
@@ -116,6 +113,7 @@ func (n *node) AddNodeDropListener(listener NodeDropListener) {
 }
 
 func (n *node) RegisterMessage(message interface{}) {
+	defer recover()
 	gob.Register(message)
 }
 
@@ -125,13 +123,7 @@ func (n *node) WaitForDone() {
 }
 
 func registerInnerMessages() {
-	registerMutex.Lock()
-	defer registerMutex.Unlock()
-	if innerMessagesRegistered {
-		return
-	}
 	gob.Register(nodeFoundMessage{})
-	innerMessagesRegistered = true
 }
 
 func (n *node) Start() error {
