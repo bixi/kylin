@@ -67,17 +67,6 @@ func (nc *nodeConnection) AddMessageHandler(handler MessageHandler) {
 	nc.messageHandlers = append(nc.messageHandlers, handler)
 }
 
-func (nc *nodeConnection) Dispatch(message interface{}) error {
-	nc.Lock()
-	defer nc.Unlock()
-	for i := 0; i < len(nc.messageHandlers); i++ {
-		if nc.messageHandlers[i](message) {
-			break
-		}
-	}
-	return nil
-}
-
 func (nc *nodeConnection) WaitForDone() {
 	nc.transporter.WaitForDone()
 }
@@ -92,4 +81,15 @@ func (nc *nodeConnection) Decode(message interface{}) error {
 
 func (nc *nodeConnection) OnError(err error) {
 	log.Printf("node %v error:%v \n", nc.Conn().RemoteAddr(), err)
+}
+
+func (nc *nodeConnection) Dispatch(message interface{}) error {
+	nc.Lock()
+	defer nc.Unlock()
+	for i := 0; i < len(nc.messageHandlers); i++ {
+		if nc.messageHandlers[i](message) {
+			break
+		}
+	}
+	return nil
 }

@@ -50,6 +50,10 @@ type node struct {
 	done              chan struct{}
 }
 
+type nodeFoundMessage struct {
+	Address string
+}
+
 var innerMessagesRegistered = false
 var registerMutex = sync.Mutex{}
 
@@ -126,6 +130,7 @@ func registerInnerMessages() {
 	if innerMessagesRegistered {
 		return
 	}
+	gob.Register(nodeFoundMessage{})
 	innerMessagesRegistered = true
 }
 
@@ -199,7 +204,7 @@ func (n *node) handleConnect(conn *websocket.Conn) {
 		return
 	}
 	resultChan := make(chan NodeConnection, 1)
-	nodeConnection := newNodeConnection(n, conn, info)
+	nodeConnection := n.createNodeConnection(conn, info)
 	command := func() {
 		n.processNodeConnected(nodeConnection, resultChan)
 	}
@@ -210,6 +215,11 @@ func (n *node) handleConnect(conn *websocket.Conn) {
 	}
 }
 
+func (n *node) createNodeConnection(conn *websocket.Conn, info NodeInfo) NodeConnection {
+	nodeConnection := newNodeConnection(n, conn, info)
+	nodeConnection.AddMessageHandler(n.handleConnectionMessage)
+	return nodeConnection
+}
 func determineHostAddress(addr1 string, addr2 string) string {
 	if addr1 < addr2 {
 		return addr1
@@ -276,6 +286,12 @@ func (n *node) processNodeConnected(nodeConnection NodeConnection, resultChan ch
 	}
 	n.addNode(nodeConnection)
 	n.onNodeJoin(nodeConnection)
+	for _, connection := range n.nodes {
+		if connection != nodeConnection {
+			connection.Send(nodeFoundMessage{nodeConnection.Info().Address})
+			nodeConnection.Send(nodeFoundMessage{connection.Info().Address})
+		}
+	}
 	resultChan <- nodeConnection
 }
 
@@ -348,7 +364,7 @@ func (n *node) connect(address string, localInfo NodeInfo) (NodeConnection, erro
 		conn.Close()
 		return nil, err
 	}
-	return newNodeConnection(n, conn, remoteInfo), nil
+	return n.createNodeConnection(conn, remoteInfo), nil
 }
 
 func (n *node) notify(address string) {
@@ -400,6 +416,20 @@ func (n *node) detectNode(remoteAddress string) {
 		n.notify(remoteAddress)
 	} else if hostAddress == remoteAddress {
 		go n.connectRoutine(hostAddress)
+	}
+}
+
+func (n *node) handleConnectionMessage(message interface{}) bool {
+	switch message.(type) {
+	case nodeFoundMessage:
+		command := func() {
+			address := message.(nodeFoundMessage).Address
+			n.detectNode(address)
+		}
+		n.commandChan <- command
+		return true
+	default:
+		return false
 	}
 }
 
