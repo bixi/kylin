@@ -123,6 +123,7 @@ func (n *node) WaitForDone() {
 }
 
 func registerInnerMessages() {
+	defer recover()
 	gob.Register(nodeFoundMessage{})
 }
 

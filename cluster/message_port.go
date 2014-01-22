@@ -1,6 +1,6 @@
 package cluster
 
-type Channel interface {
+type MessagePort interface {
 	Key() string
 	Send(interface{})
 	GlobalData() interface{}
