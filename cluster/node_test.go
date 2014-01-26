@@ -1,6 +1,7 @@
 package cluster
 
 import (
+	"runtime"
 	"testing"
 )
 
@@ -27,6 +28,8 @@ func TestNodeList(t *testing.T) {
 		t.Errorf("TestNodeList:info %q, expected %q", list[0], node.Info())
 	}
 	node.Stop()
+	node.WaitForDone()
+
 }
 
 func startTestingNode(config Config, onNodeJoin NodeJoinListener, onNodeDrop NodeDropListener) (Node, error) {
@@ -42,6 +45,7 @@ func startTestingNode(config Config, onNodeJoin NodeJoinListener, onNodeDrop Nod
 }
 
 func TestNodeJoin(t *testing.T) {
+	runtime.GOMAXPROCS(4)
 	config1 := Config{"localhost:12341", "Comet1", []string{"localhost:12342"}}
 	config2 := Config{"localhost:12342", "Comet2", []string{"localhost:12341"}}
 	done := make(chan bool)
@@ -67,6 +71,8 @@ func TestNodeJoin(t *testing.T) {
 	<-done
 	node1.Stop()
 	node2.Stop()
+	node1.WaitForDone()
+	node2.WaitForDone()
 	if result1 != "Comet2" {
 		t.Error("TestNodeJoin failed.")
 	}
@@ -76,6 +82,7 @@ func TestNodeJoin(t *testing.T) {
 }
 
 func TestNodeDrop(t *testing.T) {
+	runtime.GOMAXPROCS(4)
 	config1 := Config{"localhost:12341", "Comet1", []string{"localhost:12342"}}
 	config2 := Config{"localhost:12342", "Comet2", []string{"localhost:12341"}}
 	done := make(chan bool)
@@ -106,6 +113,8 @@ func TestNodeDrop(t *testing.T) {
 	<-done
 	node1.Stop()
 	node2.Stop()
+	node1.WaitForDone()
+	node2.WaitForDone()
 	if result1 != "Comet2" {
 		t.Error("TestNodeDrop failed.")
 	}
@@ -115,6 +124,7 @@ func TestNodeDrop(t *testing.T) {
 }
 
 func TestNodeAutoFound(t *testing.T) {
+	runtime.GOMAXPROCS(4)
 	config1 := Config{"localhost:12341", "Comet1", []string{}}
 	config2 := Config{"localhost:12342", "Comet2", []string{"localhost:12341", "localhost:12343"}}
 	config3 := Config{"localhost:12343", "Comet3", []string{}}
@@ -164,6 +174,9 @@ func TestNodeAutoFound(t *testing.T) {
 	node1.Stop()
 	node2.Stop()
 	node3.Stop()
+	node1.WaitForDone()
+	node2.WaitForDone()
+	node3.WaitForDone()
 	if result1 != "Comet3" {
 		t.Error("TestNodeAutoFound failed.")
 	}

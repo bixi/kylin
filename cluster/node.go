@@ -439,10 +439,16 @@ func (n *node) loop() {
 			case command := <-n.commandChan:
 				command()
 			default:
-				if len(n.connectingNodes) == 0 && len(n.nodes) == 0 {
-					defer recover()
-					close(n.done)
-					return
+				if len(n.nodes) > 0 {
+					for _, nc := range n.nodes {
+						nc.Stop()
+					}
+				} else {
+					if len(n.connectingNodes) == 0 {
+						defer recover()
+						close(n.done)
+						return
+					}
 				}
 			}
 		} else {
