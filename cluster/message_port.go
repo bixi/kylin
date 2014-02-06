@@ -1,14 +1,20 @@
 package cluster
 
+import "github.com/bixi/kylin/message"
+
 type MessagePort interface {
-	Key() string
 	Send(interface{})
-	GlobalData() interface{}
-	LocalData() interface{}
-	SetLocalData(interface{})
-	SetGlobalData(interface{})
-	SetOnGlobalDataChange(func(interface{}))
-	Subscribe(string)
-	Owner() NodeInfo
-	IsOwned() bool
+}
+
+type messagePort struct {
+	sendable message.Sendable
+}
+
+func newMessagePort() MessagePort {
+	mp := &messagePort{}
+	return mp
+}
+
+func (mp *messagePort) Send(interface{}) {
+
 }

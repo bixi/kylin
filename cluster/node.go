@@ -372,6 +372,7 @@ func (n *node) notify(address string) {
 		}
 	}()
 }
+
 func (n *node) listen() {
 	var err error
 	n.netListener, err = net.Listen("tcp", n.config.Address)
@@ -379,6 +380,7 @@ func (n *node) listen() {
 		log.Printf("net.Listen error:%v \n", err)
 	}
 }
+
 func (n *node) serve() {
 	mux := http.NewServeMux()
 	mux.HandleFunc(NotifyPath, n.handleNotify)
