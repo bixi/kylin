@@ -49,13 +49,13 @@ func TestTransporter(t *testing.T) {
 	gob.Register(testMessage{})
 	http.Handle("/echo", websocket.Handler(testTransporterEchoServer))
 	go func() {
-		err := http.ListenAndServe(":12344", nil)
+		err := http.ListenAndServe(":20001", nil)
 		if err != nil {
 			t.Fatal(err.Error())
 		}
 	}()
 
-	ws, err := websocket.Dial("ws://localhost:12344/echo", "", "ws://localhost/client")
+	ws, err := websocket.Dial("ws://localhost:20001/echo", "", "ws://localhost/client")
 	if err != nil {
 		t.Fatal(err.Error())
 	}

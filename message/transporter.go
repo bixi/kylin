@@ -81,6 +81,7 @@ func (t *transporter) Start() error {
 }
 
 func (t *transporter) Send(message interface{}) {
+	defer recover()
 	t.sendbox.Out <- message
 }
 

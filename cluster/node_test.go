@@ -83,8 +83,8 @@ func TestNodeJoin(t *testing.T) {
 
 func TestNodeDrop(t *testing.T) {
 	runtime.GOMAXPROCS(4)
-	config1 := Config{"localhost:12341", "Comet1", []string{"localhost:12342"}}
-	config2 := Config{"localhost:12342", "Comet2", []string{"localhost:12341"}}
+	config1 := Config{"localhost:12343", "Comet1", []string{"localhost:12344"}}
+	config2 := Config{"localhost:12344", "Comet2", []string{"localhost:12343"}}
 	done := make(chan bool)
 	var node1, node2 Node
 	var result1, result2 string
@@ -125,9 +125,9 @@ func TestNodeDrop(t *testing.T) {
 
 func TestNodeAutoFound(t *testing.T) {
 	runtime.GOMAXPROCS(4)
-	config1 := Config{"localhost:12341", "Comet1", []string{}}
-	config2 := Config{"localhost:12342", "Comet2", []string{"localhost:12341", "localhost:12343"}}
-	config3 := Config{"localhost:12343", "Comet3", []string{}}
+	config1 := Config{"localhost:12345", "Comet1", []string{}}
+	config2 := Config{"localhost:12346", "Comet2", []string{"localhost:12345", "localhost:12347"}}
+	config3 := Config{"localhost:12347", "Comet3", []string{}}
 	done := make(chan bool)
 	var node1, node2, node3 Node
 	var result1, result3 string

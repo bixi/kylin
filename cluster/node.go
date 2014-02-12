@@ -33,6 +33,8 @@ type Node interface {
 	AddNodeDropListener(NodeDropListener)
 	List() []NodeInfo
 	RegisterMessage(message interface{})
+	Broadcast(message interface{})
+	SendTo(address string, message interface{})
 }
 
 type node struct {
@@ -115,6 +117,25 @@ func (n *node) AddNodeDropListener(listener NodeDropListener) {
 func (n *node) RegisterMessage(message interface{}) {
 	defer recover()
 	gob.Register(message)
+}
+
+func (n *node) Broadcast(message interface{}) {
+	command := func() {
+		for _, nc := range n.nodes {
+			nc.Send(message)
+		}
+	}
+	n.commandChan <- command
+}
+
+func (n *node) SendTo(address string, message interface{}) {
+	command := func() {
+		nc, ok := n.nodes[address]
+		if ok {
+			nc.Send(message)
+		}
+	}
+	n.commandChan <- command
 }
 
 func (n *node) WaitForDone() {
