@@ -10,6 +10,8 @@ type PubSub interface {
 	Publish(topic string, message interface{})
 	Subscribe(topic string)
 	Unsubscribe(topic string)
+	GetSubscribersAsync(topic string, resultChan chan []string)
+	GetSubscribers(topic string) []string
 	Start() error
 	Stop() error
 	WaitForDone()
@@ -23,7 +25,6 @@ type pubsub struct {
 	commandChan utility.NonblockingChan
 	subscribers map[string]map[string]bool // topic -> node connection addresses
 	nodeTopics  map[string]map[string]bool // address -> topic set
-	stopChan    chan struct{}
 	onMessage   OnPubSubMessage
 	isStarted   bool
 }
@@ -35,42 +36,63 @@ func NewPubSub(node Node, onMessage OnPubSubMessage) PubSub {
 	ps.onMessage = onMessage
 	ps.subscribers = make(map[string]map[string]bool)
 	ps.nodeTopics = make(map[string]map[string]bool)
-	ps.stopChan = make(chan struct{})
 	node.RegisterMessage(subscribedTopicsMessage{})
 	node.RegisterMessage(subscribeMessage{})
 	node.RegisterMessage(unsubscribeMessage{})
 	node.RegisterMessage(publishMessage{})
+	onNodeJoin := NodeJoinListener(func(nc NodeConnection) {
+		nc.AddMessageHandler(MessageHandler(
+			func(message interface{}) bool {
+				return ps.handleMessage(nc.Info().Address, message)
+			}))
+		command := func() {
+			ps.sendMyTopicsTo(nc)
+		}
+		ps.postCommand(command)
+	})
+	onNodeDrop := NodeDropListener(func(nc NodeConnection) {
+		command := func() {
+			ps.removeSubscribersByAddress(nc.Info().Address)
+		}
+		ps.postCommand(command)
+	})
+	ps.node.AddNodeJoinListener(onNodeJoin)
+	ps.node.AddNodeDropListener(onNodeDrop)
 	return ps
 }
 
 func (ps *pubsub) postCommand(command func()) {
+	defer func() {
+		recover()
+	}()
 	ps.commandChan.Out <- command
+
 }
 
 type subscribedTopicsMessage struct {
-	topics []string
+	Topics []string
 }
 
 type subscribeMessage struct {
-	topic string
+	Topic string
 }
 
 type unsubscribeMessage struct {
-	topic string
+	Topic string
 }
 
 type publishMessage struct {
-	topic   string
-	message interface{}
+	Topic   string
+	Message interface{}
 }
 
 func (ps *pubsub) sendMyTopicsTo(nc NodeConnection) {
 	topicMap, ok := ps.nodeTopics[ps.node.Info().Address]
 	if ok {
 		message := subscribedTopicsMessage{}
-		message.topics = make([]string, 0, len(topicMap))
+		message.Topics = make([]string, 0, len(topicMap))
 		for k, _ := range topicMap {
-			message.topics = append(message.topics, k)
+			message.Topics = append(message.Topics, k)
 		}
 		nc.Send(message)
 	}
@@ -101,6 +123,32 @@ func (ps *pubsub) Subscribe(topic string) {
 		if !ok {
 			message := subscribeMessage{topic}
 			ps.broadcast(message)
+		}
+	}
+	ps.postCommand(command)
+}
+func (ps *pubsub) GetSubscribers(topic string) []string {
+	c := make(chan []string)
+	ps.GetSubscribersAsync(topic, c)
+	return <-c
+}
+
+func (ps *pubsub) GetSubscribersAsync(topic string, resultChan chan []string) {
+	command := func() {
+		subs, ok := ps.subscribers[topic]
+		if ok {
+			length := len(subs)
+			if length == 0 {
+				resultChan <- nil
+			} else {
+				results := make([]string, 0, length)
+				for k, _ := range subs {
+					results = append(results, k)
+				}
+				resultChan <- results
+			}
+		} else {
+			resultChan <- nil
 		}
 	}
 	ps.postCommand(command)
@@ -176,19 +224,19 @@ func (ps *pubsub) removeSubscriber(topic string, address string) {
 func (ps *pubsub) handleMessage(address string, message interface{}) bool {
 	switch message.(type) {
 	case subscribedTopicsMessage:
-		for _, topic := range message.(subscribedTopicsMessage).topics {
+		for _, topic := range message.(subscribedTopicsMessage).Topics {
 			ps.addSubscriber(topic, address)
 		}
 		return true
 	case subscribeMessage:
-		ps.addSubscriber(message.(subscribeMessage).topic, address)
+		ps.addSubscriber(message.(subscribeMessage).Topic, address)
 		return true
 	case unsubscribeMessage:
-		ps.removeSubscriber(message.(unsubscribeMessage).topic, address)
+		ps.removeSubscriber(message.(unsubscribeMessage).Topic, address)
 		return true
 	case publishMessage:
 		pm := message.(publishMessage)
-		ps.onMessage(pm.topic, pm.message)
+		ps.onMessage(pm.Topic, pm.Message)
 		return true
 	default:
 		return false
@@ -203,24 +251,6 @@ func (ps *pubsub) Start() error {
 		return errors.New("Already started.")
 	}
 	ps.isStarted = true
-	onNodeJoin := NodeJoinListener(func(nc NodeConnection) {
-		nc.AddMessageHandler(MessageHandler(
-			func(message interface{}) bool {
-				return ps.handleMessage(nc.Info().Address, message)
-			}))
-		command := func() {
-			ps.sendMyTopicsTo(nc)
-		}
-		ps.postCommand(command)
-	})
-	onNodeDrop := NodeDropListener(func(nc NodeConnection) {
-		command := func() {
-			ps.removeSubscribersByAddress(nc.Info().Address)
-		}
-		ps.postCommand(command)
-	})
-	ps.node.AddNodeJoinListener(onNodeJoin)
-	ps.node.AddNodeDropListener(onNodeDrop)
 	go ps.loop()
 	return nil
 }
